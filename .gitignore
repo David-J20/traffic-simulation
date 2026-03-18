@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.idea/
+*.iml
+Examplei/
+*.png
+*.gif
+.DS_Store
