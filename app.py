@@ -424,80 +424,135 @@ if btn_graficas or btn_ambos:
 
 if btn_animacion or btn_ambos:
     st.markdown("## 🎬 Animacion de la Simulacion")
+    st.info("⏳ Generando animacion... esto puede tomar unos segundos")
 
-    # Inicializar session state para la animacion
-    if 'animation_frames' not in st.session_state:
-        st.session_state.animation_frames = None
+    # Crear animacion GIF
+    import io
+    from PIL import Image
 
-    # Generar frames si no existen
-    if st.session_state.animation_frames is None:
-        with st.spinner("Generando animacion..."):
-            st.session_state.animation_frames = crear_animacion_estatica(150)
+    # Inicializar vehiculos
+    random.seed(42)
+    vehiculos_mixto = []
+    vehiculos_exclusivo = []
 
-    frames = st.session_state.animation_frames[0]
+    for i in range(CONFIG["num_carros"]):
+        carril = random.choice([0, 1])
+        v_m = crear_vehiculo(i, "carro", CONFIG, carril)
+        v_e = crear_vehiculo(i, "carro", CONFIG, carril)
+        v_e.posicion = v_m.posicion
+        v_e.color = v_m.color
+        vehiculos_mixto.append(v_m)
+        vehiculos_exclusivo.append(v_e)
 
-    # Slider para controlar el frame
-    frame_idx = st.slider("Paso de la simulacion", 0, len(frames)-1, 0)
+    for i in range(CONFIG["num_motos"]):
+        id_m = i + CONFIG["num_carros"]
+        carril_m = random.choice([0, 1])
+        v_m = crear_vehiculo(id_m, "moto", CONFIG, carril_m)
+        v_e = crear_vehiculo(id_m, "moto", CONFIG, 2)
+        v_e.posicion = v_m.posicion
+        vehiculos_mixto.append(v_m)
+        vehiculos_exclusivo.append(v_e)
 
-    # Obtener datos del frame seleccionado
-    paso, datos_mixto, datos_excl = frames[frame_idx]
+    def calcular_cong(v, vehiculos, es_excl):
+        dist = CONFIG["distancia_seguridad"]
+        adelante = [x for x in vehiculos if x.id != v.id and x.carril == v.carril
+                   and x.tiempo_llegada is None and x.posicion > v.posicion]
+        dist_min = min([x.posicion - v.posicion for x in adelante], default=float('inf'))
+        if es_excl and v.tipo == "moto":
+            return 0.95 if dist_min > dist else max(0.6, dist_min / dist)
+        if not es_excl and v.tipo == "moto":
+            for x in vehiculos:
+                if x.tipo == "carro" and x.tiempo_llegada is None and x.posicion > v.posicion:
+                    if x.posicion - v.posicion < dist * 2:
+                        return CONFIG["factor_congestion_mixto"]
+        return 1.0 if dist_min > dist * 3 else max(0.15, dist_min / dist * 0.5)
 
-    # Dibujar directamente desde los datos guardados
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8))
-    fig.patch.set_facecolor('#1a1a2e')
-    fig.suptitle(f'Simulacion de Trafico - Paso {paso}', fontsize=14, fontweight='bold', color='white')
-
-    L = CONFIG["longitud_via"]
-
-    for ax, datos, es_excl, titulo, color_t in [
-        (ax1, datos_mixto, False, 'SIN CARRIL EXCLUSIVO - Motos bloqueadas', '#e74c3c'),
-        (ax2, datos_excl, True, 'CON CARRIL EXCLUSIVO - Motos fluyen libres', '#27ae60')
-    ]:
-        ax.set_facecolor('#16213e')
-        ax.set_xlim(-10, L + 50)
-        ax.set_ylim(-3, 25)
-        ax.axis('off')
-
-        ax.text(L/2, 23, titulo, ha='center', fontsize=12, fontweight='bold', color=color_t)
-
-        # Carriles
-        for i in range(2):
-            ax.add_patch(patches.Rectangle((0, i*7), L, 6, facecolor='#2c3e50', edgecolor='white', lw=1))
-        if es_excl:
-            ax.add_patch(patches.Rectangle((0, 14), L, 5, facecolor='#0a4d1c', edgecolor='#00ff00', lw=2))
-            ax.text(L/2, 16.5, 'CARRIL EXCLUSIVO MOTOS', ha='center', color='#00ff00', fontsize=9, fontweight='bold')
-
-        # Meta
-        ax.add_patch(patches.Rectangle((L-8, 0), 8, 19 if es_excl else 14, facecolor='#27ae60', alpha=0.8))
-        ax.text(L-4, 9 if es_excl else 7, 'META', ha='center', va='center', color='white', fontweight='bold')
-
-        # Dibujar vehiculos desde datos guardados
-        llegados_c = 0
-        llegados_m = 0
-        for pos, carril, tipo, color, llegada in datos:
-            if llegada is not None:
-                if tipo == "carro":
-                    llegados_c += 1
-                else:
-                    llegados_m += 1
+    def mover_todos(vehiculos, es_excl, paso):
+        for v in vehiculos:
+            if v.tiempo_llegada:
                 continue
+            f = calcular_cong(v, vehiculos, es_excl)
+            v.mover(v.velocidad_base * f)
+            if v.posicion >= CONFIG["longitud_via"]:
+                v.tiempo_llegada = paso
 
-            y = carril * 7 + 3 if carril < 2 else 16.5
-            if tipo == "carro":
-                ax.add_patch(patches.FancyBboxPatch((pos-8, y-2), 16, 4,
-                            boxstyle="round,pad=0.2", facecolor=color, edgecolor='black', lw=1))
-            else:
-                color_v = '#00ff00' if es_excl else '#ff6b35'
-                ax.add_patch(patches.Circle((pos, y), 2.5, facecolor=color_v, edgecolor='black', lw=1))
+    def dibujar_frame(paso):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7))
+        fig.patch.set_facecolor('#1a1a2e')
+        fig.suptitle(f'Simulacion - Paso {paso}', fontsize=12, fontweight='bold', color='white')
+        L = CONFIG["longitud_via"]
 
-        ax.text(10, -1.5, f"Carros: {llegados_c}/{CONFIG['num_carros']}  |  Motos: {llegados_m}/{CONFIG['num_motos']}",
-               fontsize=10, color='white')
+        for ax, vehiculos, es_excl, titulo, color_t in [
+            (ax1, vehiculos_mixto, False, 'SIN CARRIL EXCLUSIVO', '#e74c3c'),
+            (ax2, vehiculos_exclusivo, True, 'CON CARRIL EXCLUSIVO', '#27ae60')
+        ]:
+            ax.set_facecolor('#16213e')
+            ax.set_xlim(-10, L + 30)
+            ax.set_ylim(-2, 22)
+            ax.axis('off')
+            ax.text(L/2, 20, titulo, ha='center', fontsize=10, fontweight='bold', color=color_t)
 
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
+            for i in range(2):
+                ax.add_patch(patches.Rectangle((0, i*6), L, 5, facecolor='#2c3e50', edgecolor='white', lw=1))
+            if es_excl:
+                ax.add_patch(patches.Rectangle((0, 12), L, 4, facecolor='#0a4d1c', edgecolor='#00ff00', lw=2))
 
-    st.success("💡 Mueve el slider para ver como avanza la simulacion en el tiempo")
+            ax.add_patch(patches.Rectangle((L-6, 0), 6, 16 if es_excl else 12, facecolor='#27ae60', alpha=0.8))
+            ax.text(L-3, 8 if es_excl else 6, 'META', ha='center', va='center', color='white', fontsize=8, fontweight='bold')
+
+            for v in vehiculos:
+                if v.tiempo_llegada:
+                    continue
+                y = v.carril * 6 + 2.5 if v.carril < 2 else 14
+                if v.tipo == "carro":
+                    ax.add_patch(patches.FancyBboxPatch((v.posicion-6, y-1.5), 12, 3,
+                                boxstyle="round,pad=0.15", facecolor=v.color, edgecolor='black', lw=0.5))
+                else:
+                    color_v = '#00ff00' if es_excl else '#ff6b35'
+                    ax.add_patch(patches.Circle((v.posicion, y), 2, facecolor=color_v, edgecolor='black', lw=0.5))
+
+            llegados = sum(1 for v in vehiculos if v.tiempo_llegada)
+            ax.text(10, -1, f"Llegaron: {llegados}/{len(vehiculos)}", fontsize=8, color='white')
+
+        plt.tight_layout()
+        return fig
+
+    # Generar frames para el GIF
+    frames_img = []
+    progress_bar = st.progress(0)
+    num_frames = 80
+
+    for paso in range(num_frames):
+        mover_todos(vehiculos_mixto, False, paso)
+        mover_todos(vehiculos_exclusivo, True, paso)
+
+        if paso % 2 == 0:  # Guardar cada 2 frames
+            fig = dibujar_frame(paso)
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=80, facecolor=fig.get_facecolor(), bbox_inches='tight')
+            buf.seek(0)
+            frames_img.append(Image.open(buf).copy())
+            plt.close(fig)
+
+        progress_bar.progress((paso + 1) / num_frames)
+
+    progress_bar.empty()
+
+    # Crear GIF
+    gif_buffer = io.BytesIO()
+    frames_img[0].save(
+        gif_buffer,
+        format='GIF',
+        save_all=True,
+        append_images=frames_img[1:],
+        duration=100,
+        loop=0
+    )
+    gif_buffer.seek(0)
+
+    # Mostrar GIF
+    st.image(gif_buffer, caption="Animacion de la simulacion", use_container_width=True)
+    st.success("✅ La animacion se reproduce automaticamente")
 
 # Footer
 st.divider()
