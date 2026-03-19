@@ -425,52 +425,33 @@ if btn_graficas or btn_ambos:
 if btn_animacion or btn_ambos:
     st.markdown("## 🎬 Animacion de la Simulacion")
 
-    with st.spinner("Generando animacion..."):
-        frames, dibujar_frame, v_mixto, v_excl = crear_animacion_estatica(150)
+    # Inicializar session state para la animacion
+    if 'animation_frames' not in st.session_state:
+        st.session_state.animation_frames = None
+
+    # Generar frames si no existen
+    if st.session_state.animation_frames is None:
+        with st.spinner("Generando animacion..."):
+            st.session_state.animation_frames = crear_animacion_estatica(150)
+
+    frames = st.session_state.animation_frames[0]
 
     # Slider para controlar el frame
-    frame_idx = st.slider("Paso de la simulacion", 0, len(frames)-1, 0, key="frame_slider")
+    frame_idx = st.slider("Paso de la simulacion", 0, len(frames)-1, 0)
 
-    # Reconstruir estado para el frame seleccionado
-    random.seed(42)
-    vehiculos_mixto = []
-    vehiculos_exclusivo = []
-
-    for i in range(CONFIG["num_carros"]):
-        v_m = crear_vehiculo(i, "carro", CONFIG, random.choice([0, 1]))
-        v_e = crear_vehiculo(i, "carro", CONFIG, random.choice([0, 1]))
-        v_e.posicion = v_m.posicion
-        v_e.color = v_m.color
-        vehiculos_mixto.append(v_m)
-        vehiculos_exclusivo.append(v_e)
-
-    for i in range(CONFIG["num_motos"]):
-        id_m = i + CONFIG["num_carros"]
-        v_m = crear_vehiculo(id_m, "moto", CONFIG, random.choice([0, 1]))
-        v_e = crear_vehiculo(id_m, "moto", CONFIG, 2)
-        v_e.posicion = v_m.posicion
-        vehiculos_mixto.append(v_m)
-        vehiculos_exclusivo.append(v_e)
-
-    # Aplicar estado del frame
+    # Obtener datos del frame seleccionado
     paso, datos_mixto, datos_excl = frames[frame_idx]
-    for i, (pos, carril, tipo, color, llegada) in enumerate(datos_mixto):
-        vehiculos_mixto[i].posicion = pos
-        vehiculos_mixto[i].tiempo_llegada = llegada
-    for i, (pos, carril, tipo, color, llegada) in enumerate(datos_excl):
-        vehiculos_exclusivo[i].posicion = pos
-        vehiculos_exclusivo[i].tiempo_llegada = llegada
 
-    # Dibujar
+    # Dibujar directamente desde los datos guardados
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8))
     fig.patch.set_facecolor('#1a1a2e')
     fig.suptitle(f'Simulacion de Trafico - Paso {paso}', fontsize=14, fontweight='bold', color='white')
 
     L = CONFIG["longitud_via"]
 
-    for ax, vehiculos, es_excl, titulo, color_t in [
-        (ax1, vehiculos_mixto, False, 'SIN CARRIL EXCLUSIVO - Motos bloqueadas', '#e74c3c'),
-        (ax2, vehiculos_exclusivo, True, 'CON CARRIL EXCLUSIVO - Motos fluyen libres', '#27ae60')
+    for ax, datos, es_excl, titulo, color_t in [
+        (ax1, datos_mixto, False, 'SIN CARRIL EXCLUSIVO - Motos bloqueadas', '#e74c3c'),
+        (ax2, datos_excl, True, 'CON CARRIL EXCLUSIVO - Motos fluyen libres', '#27ae60')
     ]:
         ax.set_facecolor('#16213e')
         ax.set_xlim(-10, L + 50)
@@ -479,28 +460,36 @@ if btn_animacion or btn_ambos:
 
         ax.text(L/2, 23, titulo, ha='center', fontsize=12, fontweight='bold', color=color_t)
 
+        # Carriles
         for i in range(2):
             ax.add_patch(patches.Rectangle((0, i*7), L, 6, facecolor='#2c3e50', edgecolor='white', lw=1))
         if es_excl:
             ax.add_patch(patches.Rectangle((0, 14), L, 5, facecolor='#0a4d1c', edgecolor='#00ff00', lw=2))
             ax.text(L/2, 16.5, 'CARRIL EXCLUSIVO MOTOS', ha='center', color='#00ff00', fontsize=9, fontweight='bold')
 
+        # Meta
         ax.add_patch(patches.Rectangle((L-8, 0), 8, 19 if es_excl else 14, facecolor='#27ae60', alpha=0.8))
         ax.text(L-4, 9 if es_excl else 7, 'META', ha='center', va='center', color='white', fontweight='bold')
 
-        for v in vehiculos:
-            if v.tiempo_llegada:
+        # Dibujar vehiculos desde datos guardados
+        llegados_c = 0
+        llegados_m = 0
+        for pos, carril, tipo, color, llegada in datos:
+            if llegada is not None:
+                if tipo == "carro":
+                    llegados_c += 1
+                else:
+                    llegados_m += 1
                 continue
-            y = v.carril * 7 + 3 if v.carril < 2 else 16.5
-            if v.tipo == "carro":
-                ax.add_patch(patches.FancyBboxPatch((v.posicion-8, y-2), 16, 4,
-                            boxstyle="round,pad=0.2", facecolor=v.color, edgecolor='black', lw=1))
-            else:
-                color = '#00ff00' if es_excl else '#ff6b35'
-                ax.add_patch(patches.Circle((v.posicion, y), 2.5, facecolor=color, edgecolor='black', lw=1))
 
-        llegados_c = sum(1 for v in vehiculos if v.tipo == "carro" and v.tiempo_llegada)
-        llegados_m = sum(1 for v in vehiculos if v.tipo == "moto" and v.tiempo_llegada)
+            y = carril * 7 + 3 if carril < 2 else 16.5
+            if tipo == "carro":
+                ax.add_patch(patches.FancyBboxPatch((pos-8, y-2), 16, 4,
+                            boxstyle="round,pad=0.2", facecolor=color, edgecolor='black', lw=1))
+            else:
+                color_v = '#00ff00' if es_excl else '#ff6b35'
+                ax.add_patch(patches.Circle((pos, y), 2.5, facecolor=color_v, edgecolor='black', lw=1))
+
         ax.text(10, -1.5, f"Carros: {llegados_c}/{CONFIG['num_carros']}  |  Motos: {llegados_m}/{CONFIG['num_motos']}",
                fontsize=10, color='white')
 
@@ -508,7 +497,7 @@ if btn_animacion or btn_ambos:
     st.pyplot(fig)
     plt.close()
 
-    st.info("💡 Mueve el slider para ver como avanza la simulacion en el tiempo")
+    st.success("💡 Mueve el slider para ver como avanza la simulacion en el tiempo")
 
 # Footer
 st.divider()
